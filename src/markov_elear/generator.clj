@@ -4,18 +4,6 @@
             [twitter.oauth :as twitter-oauth]
             [environ.core :refer [env]]))
 
-(defn word-chain [word-transitions]
-  (reduce (fn [r t] (merge-with clojure.set/union r
-                               (let [[a b c] t]
-                                 {[a b] (if c #{c} #{})})))
-          {}
-          word-transitions))
-
-(defn text->word-chain [s]
-  (let [words (clojure.string/split s #"[\s|\n]")
-        word-transitions (partition-all 3 1 words)]
-    (word-chain word-transitions)))
-
 (defn chain->text [chain]
   (apply str (interpose " " chain)))
 
@@ -40,13 +28,28 @@
         result-text (chain->text result-chain)]
     result-text))
 
-(defn process-file [fname]
-  (text->word-chain
-   (slurp (clojure.java.io/resource fname))))
+
+(defn file->ngrams [n fname ]
+  (partition-all n 1
+                 (-> (clojure.java.io/resource fname)
+                     slurp
+                     (clojure.string/split #"[\s|\n]"))))
+
 
 (def files ["quangle-wangle.txt" "monad.txt" "clojure.txt" "functional.txt"
             "jumblies.txt" "pelican.txt" "pobble.txt"])
-(def functional-leary (apply merge-with clojure.set/union (map process-file files)))
+
+(defn ngrams->rules [ngrams]
+  (reduce
+   (fn [m ngram]
+     (let [[a b c] ngram
+           k [a b]
+           v (m k)]
+       (assoc m k (if v (conj v c) #{c}))))
+   {} ngrams))
+
+
+(def functional-leary (ngrams->rules (apply concat (map (partial file->ngrams 3) files))))
 
 (def prefix-list ["On the" "They went" "And all" "We think"
                   "For every" "No other" "To a" "And every"
