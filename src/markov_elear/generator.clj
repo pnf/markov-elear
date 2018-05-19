@@ -7,33 +7,40 @@
 (defn chain->text [chain]
   (apply str (interpose " " chain)))
 
-(defn walk-chain [prefix chain result]
-  (let [suffixes (get chain prefix)]
+(defn walk-chain [nmin nmax prefix chain result]
+  (let [prefixes (conj (map #(take-last % prefix) (range (dec nmin) nmax)) prefix)
+        tries    (map chain prefixes)
+        suffixes (apply clojure.set/union tries)
+        ;; _ (println prefix (map count tries))
+        ]
     (if (empty? suffixes)
       result
       (let [suffix (first (shuffle suffixes))
-            new-prefix [(last prefix) suffix]
+            ;; new prefix grows to length nmax
+            new-prefix (concat (take-last (dec nmax) prefix) [suffix])
             result-with-spaces (chain->text result)
             result-char-count (count result-with-spaces)
             suffix-char-count (+ 1 (count suffix))
             new-result-char-count (+ result-char-count suffix-char-count)]
         (if (>= new-result-char-count 140)
           result
-          (recur new-prefix chain (conj result suffix)))))))
+          (recur nmin nmax new-prefix chain (conj result suffix)))))))
 
 (defn generate-text
-  [start-phrase word-chain]
+  [nmin nmax start-phrase word-chain]
   (let [prefix (clojure.string/split start-phrase #" ")
-        result-chain (walk-chain prefix word-chain prefix)
+        result-chain (walk-chain nmin nmax prefix word-chain prefix)
         result-text (chain->text result-chain)]
     result-text))
 
 
-(defn file->ngrams [n fname ]
-  (partition-all n 1
-                 (-> (clojure.java.io/resource fname)
-                     slurp
-                     (clojure.string/split #"[\s|\n]"))))
+(defn file->ngrams [nmin nmax fname]
+  (let [ws (-> (clojure.java.io/resource fname)
+               slurp
+               (clojure.string/split #"[\s|\n]"))
+        pnmax  (partition-all nmax 1 ws)
+        prest  (for [i (range nmin nmax)] (map (partial take i) pnmax))]
+    (apply concat pnmax prest)))
 
 
 (def files ["quangle-wangle.txt" "monad.txt" "clojure.txt" "functional.txt"
@@ -42,14 +49,14 @@
 (defn ngrams->rules [ngrams]
   (reduce
    (fn [m ngram]
-     (let [[a b c] ngram
-           k [a b]
+     (let [[w & kr] (reverse ngram)
+           k (reverse kr)
            v (m k)]
-       (assoc m k (if v (conj v c) #{c}))))
+       (assoc m k (if v (conj v w) #{w}))))
    {} ngrams))
 
 
-(def functional-leary (ngrams->rules (apply concat (map (partial file->ngrams 3) files))))
+(defn rules [nmin nmax] (ngrams->rules (apply concat (map (partial file->ngrams nmin nmax) files))))
 
 (def prefix-list ["On the" "They went" "And all" "We think"
                   "For every" "No other" "To a" "And every"
@@ -73,8 +80,9 @@
         cleaned-text (clojure.string/replace result-text #"[,| ]$" ".")]
     (clojure.string/replace cleaned-text #"\"" "'")))
 
-(defn tweet-text []
-  (let [text (generate-text (-> prefix-list shuffle first) functional-leary)]
+(defn tweet-text [nmin nmax]
+  (let [rs (rules nmin nmax)
+        text (generate-text nmin nmax (-> prefix-list shuffle first) rs)]
     (end-at-last-punctuation text)))
 
 
@@ -91,6 +99,7 @@
       (try (twitter/statuses-update :oauth-creds my-creds
                                     :params {:status tweet})
            (catch Exception e (println "Oh no! " (.getMessage e)))))))
+
 
 (def my-pool (overtone/mk-pool))
 
